@@ -408,6 +408,8 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     override fun onFinishSlidingInput() =
         keyboardSwitcher.onFinishSlidingInput(latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
 
+    override fun wordDeleteRepeatContext(): Any? = latinIME.currentInputConnection
+
     override fun canCyclePunctuation(): Boolean =
         !keyboardSwitcher.isGifPickerShowing && (inputLogic.canCyclePunctuation() || inputLogic.canSwipeCorrection())
 
@@ -532,7 +534,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
             true
         }
         KeyboardActionListener.SWIPE_DELETE_WORD -> {
-            if (steps < 0) {
+            if (steps < 0 && (connection.canDeleteCharacters() || connection.hasSelection())) {
                 inputLogic.deleteWordBeforeCursor()
                 keyboardSwitcher.requestUpdatingShiftState(
                     inputLogic.getCurrentAutoCapsState(settings.current),

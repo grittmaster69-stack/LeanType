@@ -83,6 +83,8 @@ interface KeyboardActionListener {
      *
      * @return true if the request has been consumed, false otherwise.
      */
+    fun wordDeleteRepeatContext(): Any? = null
+
     fun canCyclePunctuation(): Boolean = false
 
     fun onCustomRequest(requestCode: Int): Boolean

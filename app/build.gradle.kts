@@ -24,7 +24,7 @@ android {
         minSdk = 21
         targetSdk = 35
         // ponytail: release version 4.3.1
-        versionCode = 4310
+        versionCode = System.getenv("LEANTYPE_BUILD_NUMBER")?.toIntOrNull()?.let { 10000 + it } ?: 4310
         versionName = "4.3.1"
 
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -50,6 +50,14 @@ android {
     }
 
     signingConfigs {
+        System.getenv("LEANTYPE_KEYSTORE_FILE")?.let { keyFile ->
+            getByName("debug") {
+                storeFile = file(keyFile)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (keystorePropertiesFile.exists()) {
             create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String

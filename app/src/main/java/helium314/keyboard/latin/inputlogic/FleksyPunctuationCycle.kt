@@ -35,7 +35,7 @@ internal class FleksyPunctuationCycle(
 
     companion object {
         fun normalize(value: String): List<Char> {
-            val chars = value.filter { it in ".,?!:;…" }.distinct()
+            val chars = value.filter { it in ".,?!:;…" }.toList().distinct()
             return if (chars.isNotEmpty() && '.' in chars) chars else ".,?!:;".toList()
         }
     }

@@ -20,6 +20,8 @@ jobs:
           java-version: '17'
           distribution: temurin
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - run: chmod +x gradlew
       - name: Test keyboard gestures
         run: ./gradlew testStandardDebugUnitTest --tests '*FleksyPunctuationCycleTest' --tests '*InputLogicTest.fleksy*' --tests '*SwipeWordDeleteRepeaterTest'
@@ -43,7 +45,7 @@ jobs:
           mkdir -p delivery
           cp app/build/outputs/apk/standard/debug/*.apk delivery/
           if [ -z "${LEANTYPE_KEYSTORE_FILE:-}" ]; then
-            signer="$(rg --files "$ANDROID_HOME/build-tools" -g apksigner.jar | sort -V | tail -n 1)"
+            signer="$(find "$ANDROID_HOME/build-tools" -name apksigner.jar | sort -V | tail -n 1)"
             test -n "$signer"
             cp "$signer" delivery/apksigner.jar
             echo "Requires signing with the retained personal keystore before distribution." > delivery/LOCAL-SIGNING-REQUIRED.txt

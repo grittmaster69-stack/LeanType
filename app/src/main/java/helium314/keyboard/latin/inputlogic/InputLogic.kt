@@ -79,6 +79,66 @@ class InputLogic(
     private val mSuggestionStripViewAccessor: SuggestionStripViewAccessor,
     private val mDictionaryFacilitator: DictionaryFacilitator
 ) {
+    private var swipeCorrectionTyped: String? = null
+    private var swipeCorrectionSuffix = ""
+    private var swipeCorrectionCursor = -1
+    private var swipeCorrectionRestored = false
+
+    private fun cancelCorrectionSwipe() {
+        swipeCorrectionTyped = null
+    }
+
+    fun canSwipeCorrection(): Boolean {
+        if (swipeCorrectionTyped == null) return false
+        if (mConnection.hasSelection() || mConnection.expectedSelectionStart != swipeCorrectionCursor ||
+            mWordComposer.isComposingWord() ||
+            mConnection.getTextBeforeCursor(swipeCorrectionSuffix.length, 0)?.toString() != swipeCorrectionSuffix) {
+            cancelCorrectionSwipe()
+            return false
+        }
+        return true
+    }
+
+    /** One upward swipe restores the exact spelling; the next explicitly saves it. */
+    fun swipeUpCorrection(): Boolean {
+        if (!canSwipeCorrection()) return false
+        val typed = swipeCorrectionTyped ?: return false
+        if (swipeCorrectionRestored) {
+            try {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.UserDictionary.Words.WORD, typed)
+                    put(android.provider.UserDictionary.Words.FREQUENCY, 250)
+                    put(android.provider.UserDictionary.Words.LOCALE, mDictionaryFacilitator.currentLocale.toString())
+                    put(android.provider.UserDictionary.Words.APP_ID, 0)
+                }
+                val inserted = mLatinIME.contentResolver.insert(android.provider.UserDictionary.Words.CONTENT_URI, values)
+                if (inserted == null) throw IllegalStateException("Dictionary provider rejected word")
+                cancelCorrectionSwipe()
+                KeyboardSwitcher.getInstance().showToast(mLatinIME.getString(R.string.fleksy_word_saved, typed), true)
+            } catch (e: Exception) {
+                KeyboardSwitcher.getInstance().showToast(mLatinIME.getString(R.string.fleksy_word_save_failed), true)
+            }
+            return true
+        }
+        val corrected = mLastComposedWord.mCommittedWord.toString()
+        mConnection.beginBatchEdit()
+        try {
+            mConnection.deleteTextBeforeCursor(swipeCorrectionSuffix.length)
+            swipeCorrectionSuffix = typed + " "
+            mConnection.commitText(swipeCorrectionSuffix, 1)
+            swipeCorrectionCursor = mConnection.expectedSelectionStart
+            swipeCorrectionRestored = true
+            punctuationCycle.cancel()
+            mSpaceState = SpaceState.WEAK
+            mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD
+            RevertedCorrectionHistory.record(typed, corrected)
+            unlearnWord(corrected, Settings.getValues(), Constants.EVENT_REVERT)
+        } finally {
+            mConnection.endBatchEdit()
+        }
+        return true
+    }
+
     private var punctuationCycle = FleksyPunctuationCycle()
     private var punctuationCursor = -1
     private var punctuationSuffix = ""
@@ -171,6 +231,7 @@ class InputLogic(
         get() = mSuggestedWords
 
     fun startInput(combiningSpec: String?, settingsValues: SettingsValues) {
+        cancelCorrectionSwipe()
         punctuationCycle.cancel()
         mCapsLockFromRecapitalize = false
         mEnteredText = null
@@ -210,6 +271,7 @@ class InputLogic(
     }
 
     fun finishInput() {
+        cancelCorrectionSwipe()
         punctuationCycle.cancel()
         if (mWordComposer.isComposingWord()) {
             mConnection.finishComposingText()
@@ -235,6 +297,7 @@ class InputLogic(
                 return false
             }
 
+            cancelCorrectionSwipe()
             punctuationCycle.cancel()
             val isWeb = InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())
             if (isWeb && mWordComposer.isComposingWord() && composingSpanStart == -1 && composingSpanEnd == -1) {
@@ -305,6 +368,7 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
         punctuationCycle.cancel()
         val rawText = event.textToCommit.toString()
         val text = performSpecificTldProcessingOnTextInput(rawText)
@@ -353,6 +417,7 @@ class InputLogic(
         keyboardShiftState: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
         punctuationCycle.cancel()
         if (isInlineEmojiSearchAction()) {
             deleteTextReplacedByEmoji()
@@ -447,6 +512,7 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
         punctuationCycle.cancel()
         mWordBeingCorrectedByCursor = null
         mResumedWordStart = -1
@@ -511,6 +577,16 @@ class InputLogic(
                 && processedEvent.keyCode != KeyCode.CUSTOM5
             ) {
                 mLastComposedWord.deactivate()
+            }
+            if (processedEvent.codePoint == Constants.CODE_SPACE && inputTransaction.didAutoCorrect()
+                && mLastComposedWord.canRevertCommit() && !mWordComposer.isComposingWord()) {
+                val suffix = mLastComposedWord.mCommittedWord.toString() + " "
+                if (mConnection.getTextBeforeCursor(suffix.length, 0)?.toString() == suffix) {
+                    swipeCorrectionTyped = mLastComposedWord.mTypedWord
+                    swipeCorrectionSuffix = suffix
+                    swipeCorrectionCursor = mConnection.expectedSelectionStart
+                    swipeCorrectionRestored = false
+                }
             }
             if (KeyCode.DELETE != processedEvent.keyCode) {
                 mEnteredText = null
@@ -2036,7 +2112,6 @@ class InputLogic(
     ): Boolean {
         if (!inputTransaction.settingsValues.mUseDoubleSpacePeriod
             || Constants.CODE_SPACE != event.codePoint
-            || !isDoubleSpacePeriodCountdownActive(inputTransaction)
         ) {
             return false
         }

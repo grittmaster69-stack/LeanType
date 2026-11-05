@@ -409,12 +409,15 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         keyboardSwitcher.onFinishSlidingInput(latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
 
     override fun canCyclePunctuation(): Boolean =
-        !keyboardSwitcher.isGifPickerShowing && inputLogic.canCyclePunctuation()
+        !keyboardSwitcher.isGifPickerShowing && (inputLogic.canCyclePunctuation() || inputLogic.canSwipeCorrection())
 
     override fun onCustomRequest(requestCode: Int): Boolean {
         if (requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN ||
             requestCode == KeyboardActionListener.CODE_PUNCTUATION_UP) {
-            if (!inputLogic.cyclePunctuation(requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN)) return false
+            val handled = if (requestCode == KeyboardActionListener.CODE_PUNCTUATION_UP && inputLogic.canSwipeCorrection())
+                inputLogic.swipeUpCorrection()
+            else inputLogic.cyclePunctuation(requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN)
+            if (!handled) return false
             keyboardSwitcher.requestUpdatingShiftState(
                 inputLogic.getCurrentAutoCapsState(settings.current),
                 inputLogic.getCurrentRecapitalizeState()

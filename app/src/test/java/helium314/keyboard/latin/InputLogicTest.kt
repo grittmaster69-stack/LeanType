@@ -119,6 +119,49 @@ class InputLogicTest {
         assertEquals("hello. ", text)
     }
 
+    @Test fun fleksySwipeUpRestoresExactSpellingAndKeepsSpace() {
+        reset()
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        assertEquals("hello ", text)
+        assertTrue(inputLogic.canSwipeCorrection())
+        assertTrue(inputLogic.swipeUpCorrection())
+        handleMessages()
+        assertEquals("hellp ", text)
+        assertTrue(inputLogic.canSwipeCorrection())
+        checkConnectionConsistency()
+        input('a')
+        assertFalse(inputLogic.canSwipeCorrection())
+        assertEquals("hellp a", text)
+    }
+
+    @Test fun fleksyCorrectionStopsAfterCursorMovement() {
+        reset()
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        setCursorPosition(0, 0)
+        assertFalse(inputLogic.swipeUpCorrection())
+        assertEquals("hello ", text)
+    }
+
+    @Test fun fleksySecondSpaceHasNoTimeout() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello ")
+        val countdown = InputLogic::class.java.getDeclaredField("mDoubleSpacePeriodCountdownStart").apply { isAccessible = true }
+        countdown.setLong(inputLogic, android.os.SystemClock.uptimeMillis() - 600_000L)
+        input(' ')
+        assertEquals("hello. ", text)
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello, ", text)
+    }
+
+    @Test fun fleksySecondSpaceDoesNotChangeLeadingSpaces() {
+        reset()
+        chainInput("  ")
+        assertEquals("  ", text)
+    }
+
     @Test fun fleksyPunctuationCyclesAndReverses() {
         beginPunctuationCycle()
         for (mark in listOf(',', '?', '!')) {

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="fleksy_punctuation_cycle">Fleksy-style punctuation swipes</string>
-    <string name="fleksy_punctuation_cycle_summary">After double-space inserts a period, swipe down anywhere on the letter keys or spacebar to cycle punctuation. Swipe up to go back. Each swipe changes it once.</string>
+    <string name="fleksy_punctuation_cycle_summary">After double-space inserts a period, swipe down to cycle punctuation and up to go back. After autocorrection, swipe up to restore your spelling, then up again to save it to your personal dictionary.</string>
     <string name="fleksy_punctuation_order">Punctuation swipe order (include a period)</string>
+    <string name="fleksy_word_saved">Saved “%1$s” to personal dictionary</string>
+    <string name="fleksy_word_save_failed">Could not save the word. Swipe up to try again.</string>
 </resources>

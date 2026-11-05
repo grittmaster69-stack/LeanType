@@ -108,6 +108,52 @@ class InputLogicTest {
         ShadowLog.stream = System.out
     }
 
+    private fun beginPunctuationCycle(order: String = ".,?!:;") {
+        reset()
+        latinIME.prefs().edit {
+            putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true)
+            putBoolean("fleksy_punctuation_cycle", true)
+            putString("fleksy_punctuation_order", order)
+        }
+        chainInput("hello  ")
+        assertEquals("hello. ", text)
+    }
+
+    @Test fun fleksyPunctuationCyclesAndReverses() {
+        beginPunctuationCycle()
+        for (mark in listOf(',', '?', '!')) {
+            assertTrue(inputLogic.cyclePunctuation(true))
+            handleMessages()
+            assertEquals("hello$mark ", text)
+        }
+        assertTrue(inputLogic.cyclePunctuation(false))
+        assertEquals("hello? ", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksyPunctuationUsesCustomOrderAndStopsAfterTyping() {
+        beginPunctuationCycle(".!?,")
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello! ", text)
+        input('a')
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello! a", text)
+    }
+
+    @Test fun fleksyPunctuationStopsAfterCursorMove() {
+        beginPunctuationCycle()
+        connection.setSelection(2, 2)
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello. ", text)
+    }
+
+    @Test fun fleksyPunctuationCanBeDisabled() {
+        beginPunctuationCycle()
+        latinIME.prefs().edit { putBoolean("fleksy_punctuation_cycle", false) }
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello. ", text)
+    }
+
     @Test fun inputCode() {
         reset()
         input('c')

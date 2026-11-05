@@ -127,6 +127,10 @@ class PointerTracker private constructor(
     // true if a keyswipe gesture is enabled and warranted.
     private var mKeySwipeAllowed = false
     private var mFullSwipeStarted = false
+    private var punctuationSwipeCandidate = false
+    private var punctuationSwipeConsumed = false
+    private var punctuationDownX = 0
+    private var punctuationDownY = 0
 
     private var mInTouchpadMode = false
     private var mTouchpadLastX = 0
@@ -562,6 +566,12 @@ class PointerTracker private constructor(
 
     private fun onDownEventInternal(x: Int, y: Int, eventTime: Long) {
         var key = onDownKey(x, y, eventTime)
+        punctuationSwipeConsumed = false
+        punctuationSwipeCandidate = key != null && !key.isModifier() &&
+            key.code != KeyCode.DELETE && !sTouchpadModeActive && !sPersistentTouchpadModeActive &&
+            !sInGesture && getActivePointerTrackerCount() <= 1 && sListener.canCyclePunctuation()
+        punctuationDownX = x
+        punctuationDownY = y
         val isEmojiClipBottomRow = mKeyboard?.mId?.isEmojiClipBottomRow == true
         mIsAllowedDraggingFinger = (sParams?.mKeySelectionByDraggingFinger == true) ||
                 (key != null && key.isModifier() && !(isEmojiClipBottomRow && key.code == KeyCode.ALPHA)) ||
@@ -675,6 +685,28 @@ class PointerTracker private constructor(
         }
         if (mIsTrackingForActionDisabled) {
             return
+        }
+
+        if (punctuationSwipeConsumed) return
+        if (punctuationSwipeCandidate) {
+            val dx = x - punctuationDownX
+            val dy = y - punctuationDownY
+            val threshold = 32.dpToPx(Resources.getSystem())
+            if (getActivePointerTrackerCount() > 1 || isShowingPopupKeysPanel() || abs(dx) >= threshold) {
+                punctuationSwipeCandidate = false
+            } else if (abs(dy) >= threshold && abs(dy) > abs(dx) * 2) {
+                punctuationSwipeCandidate = false
+                val code = if (dy > 0) KeyboardActionListener.CODE_PUNCTUATION_DOWN
+                    else KeyboardActionListener.CODE_PUNCTUATION_UP
+                if (sListener.onCustomRequest(code)) {
+                    punctuationSwipeConsumed = true
+                    getTimerProxy().cancelKeyTimersOf(this)
+                    dismissPopupKeysPanel()
+                    setReleasedKeyGraphics(mCurrentKey, true)
+                    mIsDetectingGesture = false
+                    return
+                }
+            }
         }
 
         if (sGestureEnabler.shouldHandleGesture() && me != null) {
@@ -1058,6 +1090,17 @@ class PointerTracker private constructor(
     }
 
     private fun onUpEventInternal(x: Int, y: Int, eventTime: Long) {
+        punctuationSwipeCandidate = false
+        if (punctuationSwipeConsumed) {
+            punctuationSwipeConsumed = false
+            getTimerProxy().cancelKeyTimersOf(this)
+            setReleasedKeyGraphics(mCurrentKey, true)
+            mCurrentKey = null
+            mKeySwipeAllowed = false
+            sInKeySwipe = false
+            resetKeySelectionByDraggingFinger()
+            return
+        }
         getTimerProxy().cancelKeyTimersOf(this)
         val isInDraggingFinger = mIsInDraggingFinger
         val isInSlidingKeyInput = mIsInSlidingKeyInput
@@ -1209,6 +1252,8 @@ class PointerTracker private constructor(
     }
 
     private fun onCancelEventInternal() {
+        punctuationSwipeCandidate = false
+        punctuationSwipeConsumed = false
         mFullSwipeStarted = false
         mInHorizontalSwipe = false
         mInVerticalSwipe = false

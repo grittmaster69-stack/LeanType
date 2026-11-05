@@ -1,0 +1,35 @@
+name: Fleksy punctuation preview
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/fleksy-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Test punctuation behavior
+        run: ./gradlew testStandardDebugUnitTest --tests '*FleksyPunctuationCycleTest' --tests '*InputLogicTest.fleksy*'
+      - name: Build installable preview
+        run: ./gradlew assembleStandardDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LeanType-Fleksy-preview
+          path: app/build/outputs/apk/standard/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Fleksy-test-reports
+          path: app/build/reports

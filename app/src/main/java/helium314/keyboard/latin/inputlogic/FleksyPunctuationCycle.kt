@@ -24,7 +24,7 @@ internal class FleksyPunctuationCycle(
     /** Positive steps represent downward swipes, negative steps upward. */
     fun advance(steps: Int): Char? {
         if (!active || steps == 0) return null
-        index = Math.floorMod(index + steps, order.size)
+        index = ((index + steps) % order.size + order.size) % order.size
         return order[index]
     }
 
@@ -35,7 +35,7 @@ internal class FleksyPunctuationCycle(
 
     companion object {
         fun normalize(value: String): List<Char> {
-            val chars = value.filter { !it.isWhitespace() }.distinct()
+            val chars = value.filter { it in ".,?!:;…" }.distinct()
             return if (chars.isNotEmpty() && '.' in chars) chars else ".,?!:;".toList()
         }
     }

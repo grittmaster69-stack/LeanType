@@ -6,6 +6,7 @@
 
 package helium314.keyboard.latin.inputlogic
 
+import helium314.keyboard.latin.utils.prefs
 import android.graphics.Color
 import android.os.SystemClock
 import android.text.InputType
@@ -78,6 +79,39 @@ class InputLogic(
     private val mSuggestionStripViewAccessor: SuggestionStripViewAccessor,
     private val mDictionaryFacilitator: DictionaryFacilitator
 ) {
+    private var punctuationCycle = FleksyPunctuationCycle()
+    private var punctuationCursor = -1
+    private var punctuationSuffix = ""
+
+    fun canCyclePunctuation(): Boolean {
+        if (!punctuationCycle.active) return false
+        if (!mLatinIME.prefs().getBoolean("fleksy_punctuation_cycle", true)
+            || mConnection.hasSelection()
+            || mConnection.expectedSelectionStart != punctuationCursor
+            || mConnection.getTextBeforeCursor(punctuationSuffix.length, 0)?.toString() != punctuationSuffix
+        ) {
+            punctuationCycle.cancel()
+            return false
+        }
+        return true
+    }
+
+    fun cyclePunctuation(down: Boolean): Boolean {
+        if (!canCyclePunctuation()) return false
+        val next = punctuationCycle.advance(if (down) 1 else -1) ?: return false
+        mConnection.beginBatchEdit()
+        try {
+            mConnection.deleteTextBeforeCursor(punctuationSuffix.length)
+            punctuationSuffix = next + " "
+            mConnection.commitText(punctuationSuffix, 1)
+            punctuationCursor = mConnection.expectedSelectionStart
+            mSpaceState = SpaceState.NONE
+        } finally {
+            mConnection.endBatchEdit()
+        }
+        return true
+    }
+
     private var mSpaceState = SpaceState.NONE
     private var mSuggestedWords: SuggestedWords = SuggestedWords.getEmptyInstance()
     private val mSuggest: Suggest = Suggest(mDictionaryFacilitator)
@@ -137,6 +171,7 @@ class InputLogic(
         get() = mSuggestedWords
 
     fun startInput(combiningSpec: String?, settingsValues: SettingsValues) {
+        punctuationCycle.cancel()
         mCapsLockFromRecapitalize = false
         mEnteredText = null
         mWordBeingCorrectedByCursor = null
@@ -175,6 +210,7 @@ class InputLogic(
     }
 
     fun finishInput() {
+        punctuationCycle.cancel()
         if (mWordComposer.isComposingWord()) {
             mConnection.finishComposingText()
             StatsUtils.onWordCommitUserTyped(mWordComposer.getTypedWord(), mWordComposer.isBatchMode())
@@ -199,6 +235,7 @@ class InputLogic(
                 return false
             }
 
+            punctuationCycle.cancel()
             val isWeb = InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())
             if (isWeb && mWordComposer.isComposingWord() && composingSpanStart == -1 && composingSpanEnd == -1) {
                 // The web editor / contenteditable JS destroyed our composing span in the DOM.
@@ -268,6 +305,7 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        punctuationCycle.cancel()
         val rawText = event.textToCommit.toString()
         val text = performSpecificTldProcessingOnTextInput(rawText)
         val inputTransaction = InputTransaction(
@@ -315,6 +353,7 @@ class InputLogic(
         keyboardShiftState: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        punctuationCycle.cancel()
         if (isInlineEmojiSearchAction()) {
             deleteTextReplacedByEmoji()
         }
@@ -408,6 +447,7 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        punctuationCycle.cancel()
         mWordBeingCorrectedByCursor = null
         mResumedWordStart = -1
         mResumedWordEnd = -1
@@ -2016,6 +2056,14 @@ class InputLogic(
             mConnection.deleteTextBeforeCursor(1)
             val textToInsert = inputTransaction.settingsValues.mSpacingAndPunctuations.mSentenceSeparatorAndSpace
             mConnection.commitText(textToInsert, 1)
+            if (textToInsert == ". " && mLatinIME.prefs().getBoolean("fleksy_punctuation_cycle", true)) {
+                punctuationCycle = FleksyPunctuationCycle(
+                    mLatinIME.prefs().getString("fleksy_punctuation_order", ".,?!:;") ?: ".,?!:;"
+                )
+                punctuationSuffix = textToInsert
+                punctuationCursor = mConnection.expectedSelectionStart
+                punctuationCycle.begin()
+            }
             inputTransaction.requireShiftUpdate(InputTransaction.SHIFT_UPDATE_NOW)
             inputTransaction.setRequiresUpdateSuggestions()
             return true

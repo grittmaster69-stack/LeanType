@@ -408,7 +408,20 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     override fun onFinishSlidingInput() =
         keyboardSwitcher.onFinishSlidingInput(latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
 
+    override fun canCyclePunctuation(): Boolean =
+        !keyboardSwitcher.isGifPickerShowing && inputLogic.canCyclePunctuation()
+
     override fun onCustomRequest(requestCode: Int): Boolean {
+        if (requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN ||
+            requestCode == KeyboardActionListener.CODE_PUNCTUATION_UP) {
+            if (!inputLogic.cyclePunctuation(requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN)) return false
+            keyboardSwitcher.requestUpdatingShiftState(
+                inputLogic.getCurrentAutoCapsState(settings.current),
+                inputLogic.getCurrentRecapitalizeState()
+            )
+            performHapticFeedback(HapticEvent.GESTURE_MOVE)
+            return true
+        }
         if (requestCode == Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER) {
             return latinIME.showInputPickerDialog()
         }

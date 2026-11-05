@@ -121,6 +121,7 @@ class InputLogicTest {
 
     @Test fun fleksySwipeUpRestoresExactSpellingAndKeepsSpace() {
         reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
         chainInput("hellp")
         getAutocorrectedWithSpaceAfter("hello", "hellp")
         assertEquals("hello ", text)
@@ -135,8 +136,38 @@ class InputLogicTest {
         assertEquals("hellp a", text)
     }
 
+    @Test fun fleksySecondSwipeSavesTheRestoredWord() {
+        var saved: android.content.ContentValues? = null
+        val provider = object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun getType(uri: android.net.Uri): String? = null
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?,
+                selectionArgs: Array<out String>?, sortOrder: String?): android.database.Cursor? = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri {
+                saved = values?.let { android.content.ContentValues(it) }
+                return android.net.Uri.withAppendedPath(uri, "1")
+            }
+            override fun delete(uri: android.net.Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?,
+                selectionArgs: Array<out String>?) = 0
+        }
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("user_dictionary", provider)
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        assertTrue(inputLogic.swipeUpCorrection())
+        assertEquals(null, saved)
+        assertTrue(inputLogic.swipeUpCorrection())
+        assertEquals("hellp", saved?.getAsString(android.provider.UserDictionary.Words.WORD))
+        assertEquals("en_US", saved?.getAsString(android.provider.UserDictionary.Words.LOCALE))
+        assertEquals("hellp ", text)
+        assertFalse(inputLogic.canSwipeCorrection())
+    }
+
     @Test fun fleksyCorrectionStopsAfterCursorMovement() {
         reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
         chainInput("hellp")
         getAutocorrectedWithSpaceAfter("hello", "hellp")
         setCursorPosition(0, 0)

@@ -682,9 +682,7 @@ f""", // no newline at the end
         assertEquals("0", nKey.mPopupKeys?.first()?.mLabel)
         assertEquals("0", nKey.mHintLabel)
 
-        val commaKey = allKeys.first { it.mLabel == "," }
-        assertEquals("'", commaKey.mPopupKeys?.first()?.mLabel)
-        assertEquals("'", commaKey.mHintLabel)
+        assertEquals(1, allKeys.count { it.mCode == KeyCode.EMOJI })
 
         val periodKey = allKeys.first { it.mLabel == "." }
         assertEquals("!", periodKey.mPopupKeys?.first()?.mLabel)

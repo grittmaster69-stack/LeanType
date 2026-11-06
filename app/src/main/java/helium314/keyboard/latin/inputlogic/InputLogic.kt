@@ -6,6 +6,7 @@
 
 package helium314.keyboard.latin.inputlogic
 
+import helium314.keyboard.latin.utils.prefs
 import android.graphics.Color
 import android.os.SystemClock
 import android.text.InputType
@@ -78,6 +79,99 @@ class InputLogic(
     private val mSuggestionStripViewAccessor: SuggestionStripViewAccessor,
     private val mDictionaryFacilitator: DictionaryFacilitator
 ) {
+    private var swipeCorrectionTyped: String? = null
+    private var swipeCorrectionSuffix = ""
+    private var swipeCorrectionCursor = -1
+    private var swipeCorrectionRestored = false
+
+    private fun cancelCorrectionSwipe() {
+        swipeCorrectionTyped = null
+    }
+
+    fun canSwipeCorrection(): Boolean {
+        if (swipeCorrectionTyped == null) return false
+        if (mConnection.hasSelection() || mConnection.expectedSelectionStart != swipeCorrectionCursor ||
+            mWordComposer.isComposingWord() ||
+            mConnection.getTextBeforeCursor(swipeCorrectionSuffix.length, 0)?.toString() != swipeCorrectionSuffix) {
+            cancelCorrectionSwipe()
+            return false
+        }
+        return true
+    }
+
+    /** One upward swipe restores the exact spelling; the next explicitly saves it. */
+    fun swipeUpCorrection(): Boolean {
+        if (!canSwipeCorrection()) return false
+        val typed = swipeCorrectionTyped ?: return false
+        if (swipeCorrectionRestored) {
+            try {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.UserDictionary.Words.WORD, typed)
+                    put(android.provider.UserDictionary.Words.FREQUENCY, 250)
+                    put(android.provider.UserDictionary.Words.LOCALE, mDictionaryFacilitator.currentLocale.toString())
+                    put(android.provider.UserDictionary.Words.APP_ID, 0)
+                }
+                val inserted = mLatinIME.contentResolver.insert(android.provider.UserDictionary.Words.CONTENT_URI, values)
+                if (inserted == null) throw IllegalStateException("Dictionary provider rejected word")
+                cancelCorrectionSwipe()
+                KeyboardSwitcher.getInstance().showToast(mLatinIME.getString(R.string.fleksy_word_saved, typed), true)
+            } catch (e: Exception) {
+                KeyboardSwitcher.getInstance().showToast(mLatinIME.getString(R.string.fleksy_word_save_failed), true)
+            }
+            return true
+        }
+        val corrected = mLastComposedWord.mCommittedWord.toString()
+        mConnection.beginBatchEdit()
+        try {
+            mConnection.deleteTextBeforeCursor(swipeCorrectionSuffix.length)
+            swipeCorrectionSuffix = typed + " "
+            mConnection.commitText(swipeCorrectionSuffix, 1)
+            swipeCorrectionCursor = mConnection.expectedSelectionStart
+            swipeCorrectionRestored = true
+            punctuationCycle.cancel()
+            mSpaceState = SpaceState.WEAK
+            mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD
+            RevertedCorrectionHistory.record(typed, corrected)
+            unlearnWord(corrected, Settings.getValues(), Constants.EVENT_REVERT)
+        } finally {
+            mConnection.endBatchEdit()
+        }
+        return true
+    }
+
+    private var punctuationCycle = FleksyPunctuationCycle()
+    private var punctuationCursor = -1
+    private var punctuationSuffix = ""
+
+    fun canCyclePunctuation(): Boolean {
+        if (!punctuationCycle.active) return false
+        if (!mLatinIME.prefs().getBoolean("fleksy_punctuation_cycle", true)
+            || mConnection.hasSelection()
+            || mConnection.expectedSelectionStart != punctuationCursor
+            || mConnection.getTextBeforeCursor(punctuationSuffix.length, 0)?.toString() != punctuationSuffix
+        ) {
+            punctuationCycle.cancel()
+            return false
+        }
+        return true
+    }
+
+    fun cyclePunctuation(down: Boolean): Boolean {
+        if (!canCyclePunctuation()) return false
+        val next = punctuationCycle.advance(if (down) 1 else -1) ?: return false
+        mConnection.beginBatchEdit()
+        try {
+            mConnection.deleteTextBeforeCursor(punctuationSuffix.length)
+            punctuationSuffix = next + " "
+            mConnection.commitText(punctuationSuffix, 1)
+            punctuationCursor = mConnection.expectedSelectionStart
+            mSpaceState = SpaceState.NONE
+        } finally {
+            mConnection.endBatchEdit()
+        }
+        return true
+    }
+
     private var mSpaceState = SpaceState.NONE
     private var mSuggestedWords: SuggestedWords = SuggestedWords.getEmptyInstance()
     private val mSuggest: Suggest = Suggest(mDictionaryFacilitator)
@@ -137,6 +231,8 @@ class InputLogic(
         get() = mSuggestedWords
 
     fun startInput(combiningSpec: String?, settingsValues: SettingsValues) {
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
         mCapsLockFromRecapitalize = false
         mEnteredText = null
         mWordBeingCorrectedByCursor = null
@@ -175,6 +271,8 @@ class InputLogic(
     }
 
     fun finishInput() {
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
         if (mWordComposer.isComposingWord()) {
             mConnection.finishComposingText()
             StatsUtils.onWordCommitUserTyped(mWordComposer.getTypedWord(), mWordComposer.isBatchMode())
@@ -199,6 +297,8 @@ class InputLogic(
                 return false
             }
 
+            cancelCorrectionSwipe()
+            punctuationCycle.cancel()
             val isWeb = InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())
             if (isWeb && mWordComposer.isComposingWord() && composingSpanStart == -1 && composingSpanEnd == -1) {
                 // The web editor / contenteditable JS destroyed our composing span in the DOM.
@@ -268,6 +368,8 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
         val rawText = event.textToCommit.toString()
         val text = performSpecificTldProcessingOnTextInput(rawText)
         val inputTransaction = InputTransaction(
@@ -315,6 +417,8 @@ class InputLogic(
         keyboardShiftState: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
         if (isInlineEmojiSearchAction()) {
             deleteTextReplacedByEmoji()
         }
@@ -408,6 +512,8 @@ class InputLogic(
         keyboardShiftMode: Int,
         handler: LatinIME.UIHandler
     ): InputTransaction {
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
         mWordBeingCorrectedByCursor = null
         mResumedWordStart = -1
         mResumedWordEnd = -1
@@ -471,6 +577,16 @@ class InputLogic(
                 && processedEvent.keyCode != KeyCode.CUSTOM5
             ) {
                 mLastComposedWord.deactivate()
+            }
+            if (processedEvent.codePoint == Constants.CODE_SPACE && inputTransaction.didAutoCorrect()
+                && mLastComposedWord.canRevertCommit() && !mWordComposer.isComposingWord()) {
+                val suffix = mLastComposedWord.mCommittedWord.toString() + " "
+                if (mConnection.getTextBeforeCursor(suffix.length, 0)?.toString() == suffix) {
+                    swipeCorrectionTyped = mLastComposedWord.mTypedWord
+                    swipeCorrectionSuffix = suffix
+                    swipeCorrectionCursor = mConnection.expectedSelectionStart
+                    swipeCorrectionRestored = false
+                }
             }
             if (KeyCode.DELETE != processedEvent.keyCode) {
                 mEnteredText = null
@@ -1542,49 +1658,61 @@ class InputLogic(
         return true
     }
 
-    fun deleteWordBeforeCursor() {
+    fun deleteWordBeforeCursor(): Boolean {
         val settingsValues = Settings.getValues()
-        if (mConnection.hasSelection()) {
-            val selection = mConnection.getSelectedText(0)
-            if (!selection.isNullOrEmpty()) {
-                unlearnWord(selection.toString(), settingsValues, Constants.EVENT_BACKSPACE)
-            }
-            mWordComposer.reset()
-            sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
-            mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
-            mLatinIME.feedbackForDeletedWord()
-            KeyboardActionListenerImpl.deactivateSelectionMode()
-            return
-        }
-
-        if (mWordComposer.isComposingWord()) {
-            val composingWord = mWordComposer.getTypedWord()
-            if (!TextUtils.isEmpty(composingWord)) {
-                unlearnWord(composingWord, settingsValues, Constants.EVENT_BACKSPACE)
-            }
-            mWordComposer.reset()
+        val wasComposing = mWordComposer.isComposingWord()
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
+        cancelDoubleSpacePeriodCountdown()
+        mLatinIME.mHandler.cancelUpdateSuggestionStrip()
+        mLatinIME.mHandler.cancelResumeSuggestions()
+        mConnection.beginBatchEdit()
+        try {
+            // Finish the host's composing span before deleting; committing an empty string
+            // after finishing composition merely inserts nothing and consumes the first swipe.
             mConnection.finishComposingText()
-            mConnection.commitText("", 1)
             resetComposingState(true)
+            mSpaceState = SpaceState.NONE
+            mEnteredText = null
+            mWordBeingCorrectedByCursor = null
+            mJustRevertedACommit = false
+            mLastExpandedText = null
+            mLastShortcutText = null
+            mLastExpandedCursorPosition = -1
+            mLastExpandedCursorOffset = -1
+            mJustRevertedExpandedShortcut = null
+
+            if (mConnection.hasSelection()) {
+                val selection = mConnection.getSelectedText(0)?.toString()
+                if (!selection.isNullOrEmpty())
+                    unlearnWord(selection, settingsValues, Constants.EVENT_BACKSPACE)
+                sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
+                KeyboardActionListenerImpl.deactivateSelectionMode()
+            } else {
+                val before = mConnection.getTextBeforeCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString() ?: return false
+                val after = mConnection.getTextAfterCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString() ?: ""
+                val plan = SwipeDeleteUnit.plan(before, after) ?: return false
+                if (wasComposing && !plan.word.isNullOrEmpty())
+                    unlearnWord(plan.word, settingsValues, Constants.EVENT_BACKSPACE)
+                if (InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())) {
+                    // Web editors already use delete key events for compatibility. Selecting
+                    // the exact unit first also removes the portion after a mid-word caret.
+                    val cursor = mConnection.expectedSelectionStart
+                    if (cursor < 0 || !mConnection.setSelection(cursor - plan.before, cursor + plan.after))
+                        return false
+                    sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
+                } else {
+                    mConnection.deleteSurroundingText(plan.before, plan.after)
+                }
+                if (plan.replacement.isNotEmpty()) mConnection.commitText(plan.replacement, 1)
+                StatsUtils.onBackspaceWordDelete(plan.before + plan.after - plan.replacement.length)
+            }
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
             mLatinIME.feedbackForDeletedWord()
-            return
+            return true
+        } finally {
+            mConnection.endBatchEdit()
         }
-
-        val textBefore = mConnection.getTextBeforeCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString()
-        if (textBefore.isNullOrEmpty()) return
-
-        val length = textBefore.length - getStartOfPreviousWord(textBefore)
-        if (length <= 0) return
-
-        if (InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())) {
-            repeat(length) { sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL) }
-        } else {
-            mConnection.deleteTextBeforeCursor(length)
-        }
-        StatsUtils.onBackspaceWordDelete(length)
-        mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
-        mLatinIME.feedbackForDeletedWord()
     }
 
     private fun handleBackspaceEvent(event: Event, inputTransaction: InputTransaction) {
@@ -1995,8 +2123,8 @@ class InputLogic(
         inputTransaction: InputTransaction
     ): Boolean {
         if (!inputTransaction.settingsValues.mUseDoubleSpacePeriod
+            || mConnection.hasSelection()
             || Constants.CODE_SPACE != event.codePoint
-            || !isDoubleSpacePeriodCountdownActive(inputTransaction)
         ) {
             return false
         }
@@ -2011,11 +2139,19 @@ class InputLogic(
         } else {
             lastTwo[length - 2].code
         }
-        if (canBeFollowedByDoubleSpacePeriod(firstCodePoint)) {
+        if (canBeFollowedByDoubleSpacePeriod(firstCodePoint) || firstCodePoint == '.'.code) {
             cancelDoubleSpacePeriodCountdown()
             mConnection.deleteTextBeforeCursor(1)
             val textToInsert = inputTransaction.settingsValues.mSpacingAndPunctuations.mSentenceSeparatorAndSpace
             mConnection.commitText(textToInsert, 1)
+            if (textToInsert == ". " && mLatinIME.prefs().getBoolean("fleksy_punctuation_cycle", true)) {
+                punctuationCycle = FleksyPunctuationCycle(
+                    mLatinIME.prefs().getString("fleksy_punctuation_order", ".,?!:;") ?: ".,?!:;"
+                )
+                punctuationSuffix = textToInsert
+                punctuationCursor = mConnection.expectedSelectionStart
+                punctuationCycle.begin()
+            }
             inputTransaction.requireShiftUpdate(InputTransaction.SHIFT_UPDATE_NOW)
             inputTransaction.setRequiresUpdateSuggestions()
             return true

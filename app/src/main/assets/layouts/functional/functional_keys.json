@@ -7,12 +7,15 @@
   [
     { "label": "symbol_alpha", "width": 0.15 },
     { "$": "variation_selector",
-      "default":  { "label": "comma" },
+      "default":  { "$": "keyboard_state_selector", "alphabet": { "label": "emoji" }, "default": { "label": "comma" } },
       "email":    { "label": "@", "groupId": 1, "type": "function" },
       "uri":      { "label": "/", "groupId": 1, "type": "function" }
     },
     { "$": "keyboard_state_selector", "languageKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "language_switch" }}},
-    { "$": "keyboard_state_selector", "emojiKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "emoji" }}},
+    { "$": "variation_selector",
+      "email": { "$": "keyboard_state_selector", "emojiKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "emoji" }}},
+      "uri": { "$": "keyboard_state_selector", "emojiKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "emoji" }}}
+    },
     { "$": "keyboard_state_selector", "symbols": { "label": "numpad" }},
     { "label": "space" },
     { "label": "period", "labelFlags": 1073741824 },

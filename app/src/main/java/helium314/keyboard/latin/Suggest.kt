@@ -23,6 +23,7 @@ import helium314.keyboard.latin.dictionary.Dictionary
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.SettingsValuesForSuggestion
 import helium314.keyboard.latin.suggestions.SuggestionStripView
+import helium314.keyboard.latin.utils.DigitTypoCorrection
 import helium314.keyboard.latin.utils.AutoCorrectionUtils
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.JniUtils
@@ -259,10 +260,14 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
             || !allowsToBeAutoCorrected // If we are doing prediction, then we never auto-correct of course
             || !wordComposer.isComposingWord() // If we don't have suggestion results, we can't evaluate the first suggestion
             // for auto-correction
-            || suggestionResults.isEmpty() // If the word has digits, we never auto-correct because it's likely the word
-            // was type with a lot of care
-            || wordComposer.hasDigits() // If the word is mostly caps, we never auto-correct because this is almost
-            // certainly intentional (and careful input)
+            || suggestionResults.isEmpty()
+            // Keep numbers/identifiers protected, but evaluate a dictionary match for a single
+            // misplaced interior digit in a lowercase/titlecase word (e.g. Disas9mbled).
+            || (wordComposer.hasDigits() &&
+                (!DigitTypoCorrection.isLikelyTypo(consideredWord, firstSuggestionInContainer?.mWord)
+                    || typedWordInfo != null
+                    || mDictionaryFacilitator.isValidSpellingWord(consideredWord)))
+            // Mostly-caps mixed-case input is normally intentional.
             || (wordComposer.isMostlyCaps() && !wordComposer.isAllUpperCase()) // We never auto-correct when suggestions are resumed because it would be unexpected
             || wordComposer.isResumed() // If we don't have a main dictionary, we never want to auto-correct. The reason
             || isDeveloperTokenOrSpecialSyntax(consideredWord)

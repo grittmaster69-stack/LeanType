@@ -70,6 +70,24 @@ class ParserTest {
         addLocaleKeyTextsToParams(latinIME, params, POPUP_KEYS_NORMAL)
     }
 
+    @Test fun fleksyEmojiOccupiesCommaPositionOnLetterKeyboard() {
+        for (name in listOf("functional_keys", "functional_keys_khipro")) {
+            params.mId = KeyboardLayoutSet.getFakeKeyboardId(KeyboardId.ELEMENT_ALPHABET)
+            val json = latinIME.assets.open("layouts/functional/$name.json").bufferedReader().use { it.readText() }
+            val row = LayoutParser.parseJsonString(json).last().mapNotNull { it.compute(params)?.toKeyParams(params) }
+            assertEquals(KeyCode.EMOJI, row[1].mCode)
+            assertEquals(1, row.count { it.mCode == KeyCode.EMOJI })
+            assertTrue(row.none { it.mCode == ','.code })
+        }
+    }
+
+    @Test fun fleksyCommaRemainsOnSymbolsKeyboard() {
+        params.mId = KeyboardLayoutSet.getFakeKeyboardId(KeyboardId.ELEMENT_SYMBOLS)
+        val json = latinIME.assets.open("layouts/functional/functional_keys.json").bufferedReader().use { it.readText() }
+        val row = LayoutParser.parseJsonString(json).last().mapNotNull { it.compute(params)?.toKeyParams(params) }
+        assertEquals(','.code, row[1].mCode)
+    }
+
     @Test fun backgroundType() {
         // CHARACTER -> NORMAL
         assertIsExpected("""[[{ "label": "a", "type": "character" }]]""", Expected('a'.code, "a", background = Key.BACKGROUND_TYPE_NORMAL))
@@ -664,9 +682,7 @@ f""", // no newline at the end
         assertEquals("0", nKey.mPopupKeys?.first()?.mLabel)
         assertEquals("0", nKey.mHintLabel)
 
-        val commaKey = allKeys.first { it.mLabel == "," }
-        assertEquals("'", commaKey.mPopupKeys?.first()?.mLabel)
-        assertEquals("'", commaKey.mHintLabel)
+        assertEquals(1, allKeys.count { it.mCode == KeyCode.EMOJI })
 
         val periodKey = allKeys.first { it.mLabel == "." }
         assertEquals("!", periodKey.mPopupKeys?.first()?.mLabel)

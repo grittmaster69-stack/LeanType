@@ -30,6 +30,7 @@ import helium314.keyboard.settings.previewDark
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import helium314.keyboard.settings.SettingsWithoutKey
+import helium314.keyboard.settings.preferences.TextInputPreference
 import helium314.keyboard.settings.preferences.ListPreference
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -107,6 +108,11 @@ fun GestureTypingScreen(
             }
 
             add(R.string.settings_category_gestures_advanced)
+            add("fleksy_punctuation_cycle")
+            add("fleksy_punctuation_order")
+            add("swipe_word_delete_hold")
+            add("swipe_word_delete_hold_delay")
+            add("swipe_word_delete_repeat_interval")
             add(Settings.PREF_SPACE_HORIZONTAL_SWIPE)
             add(Settings.PREF_DELETE_SWIPE)
             add(Settings.PREF_DELETE_SWIPE_WORD_BY_WORD)
@@ -181,6 +187,27 @@ fun GestureTypingScreen(
 }
 
 fun createGestureTypingSettings(context: Context) = listOf(
+    Setting(context, "swipe_word_delete_hold", R.string.swipe_word_delete_hold, R.string.swipe_word_delete_hold_summary) {
+        SwitchPreference(it, true)
+    },
+    Setting(context, "swipe_word_delete_hold_delay", R.string.swipe_word_delete_hold_delay) {
+        SliderPreference(name = it.title, key = it.key, default = 400,
+            range = 100f..1500f, stepSize = 50, description = { value -> "$value ms" })
+    },
+    Setting(context, "swipe_word_delete_repeat_interval", R.string.swipe_word_delete_repeat_interval) {
+        SliderPreference(name = it.title, key = it.key, default = 250,
+            range = 100f..1000f, stepSize = 50, description = { value -> "$value ms" })
+    },
+    Setting(context, "fleksy_punctuation_cycle", R.string.fleksy_punctuation_cycle, R.string.fleksy_punctuation_cycle_summary) {
+        SwitchPreference(it, true)
+    },
+    Setting(context, "fleksy_punctuation_order", R.string.fleksy_punctuation_order) {
+        TextInputPreference(it, ".,?!:;", checkTextValid = { value ->
+            val order = value.filterNot { ch -> ch.isWhitespace() }
+            order.length in 2..12 && '.' in order &&
+                order.all { ch -> ch in ".,?!:;…" } && order.toSet().size == order.length
+        })
+    },
     Setting(context, Settings.PREF_GESTURE_INPUT, R.string.gesture_input, R.string.gesture_input_summary) {
         val ctx = LocalContext.current
         SwitchPreference(it, Defaults.PREF_GESTURE_INPUT) { enabled ->

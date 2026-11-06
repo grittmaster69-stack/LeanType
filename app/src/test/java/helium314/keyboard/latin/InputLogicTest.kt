@@ -108,6 +108,249 @@ class InputLogicTest {
         ShadowLog.stream = System.out
     }
 
+    private fun beginPunctuationCycle(order: String = ".,?!:;") {
+        reset()
+        latinIME.prefs().edit {
+            putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true)
+            putBoolean("fleksy_punctuation_cycle", true)
+            putString("fleksy_punctuation_order", order)
+        }
+        chainInput("hello  ")
+        assertEquals("hello. ", text)
+    }
+
+    @Test fun fleksySwipeUpRestoresExactSpellingAndKeepsSpace() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        assertEquals("hello ", text)
+        assertTrue(inputLogic.canSwipeCorrection())
+        assertTrue(inputLogic.swipeUpCorrection())
+        handleMessages()
+        assertEquals("hellp ", text)
+        assertTrue(inputLogic.canSwipeCorrection())
+        checkConnectionConsistency()
+        input('a')
+        assertFalse(inputLogic.canSwipeCorrection())
+        assertEquals("hellp a", text)
+    }
+
+    @Test fun fleksySecondSwipeSavesTheRestoredWord() {
+        var saved: android.content.ContentValues? = null
+        val provider = object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun getType(uri: android.net.Uri): String? = null
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?,
+                selectionArgs: Array<out String>?, sortOrder: String?): android.database.Cursor? = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri {
+                saved = values?.let { android.content.ContentValues(it) }
+                return android.net.Uri.withAppendedPath(uri, "1")
+            }
+            override fun delete(uri: android.net.Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?,
+                selectionArgs: Array<out String>?) = 0
+        }
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("user_dictionary", provider)
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        assertTrue(inputLogic.swipeUpCorrection())
+        assertEquals(null, saved)
+        assertTrue(inputLogic.swipeUpCorrection())
+        assertEquals("hellp", saved?.getAsString(android.provider.UserDictionary.Words.WORD))
+        assertEquals("en_US", saved?.getAsString(android.provider.UserDictionary.Words.LOCALE))
+        assertEquals("hellp ", text)
+        assertFalse(inputLogic.canSwipeCorrection())
+    }
+
+    @Test fun fleksyCorrectionStopsAfterCursorMovement() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hellp")
+        getAutocorrectedWithSpaceAfter("hello", "hellp")
+        setCursorPosition(0, 0)
+        assertFalse(inputLogic.swipeUpCorrection())
+        assertEquals("hello ", text)
+    }
+
+    @Test fun fleksySecondSpaceHasNoTimeout() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello ")
+        val countdown = InputLogic::class.java.getDeclaredField("mDoubleSpacePeriodCountdownStart").apply { isAccessible = true }
+        countdown.setLong(inputLogic, android.os.SystemClock.uptimeMillis() - 600_000L)
+        input(' ')
+        assertEquals("hello. ", text)
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello, ", text)
+    }
+
+    @Test fun fleksySwipeDeletesPunctuationBeforeTheWord() {
+        reset()
+        chainInput("hello. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("hello ", text)
+        checkConnectionConsistency()
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("", text)
+        assertFalse(inputLogic.deleteWordBeforeCursor())
+    }
+
+    @Test fun fleksySwipeDeletesAnUnfinishedComposingWordOnFirstSwipe() {
+        reset()
+        chainInput("one part")
+        assertTrue(inputLogic.isComposingWord)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        assertFalse(inputLogic.isComposingWord)
+        checkConnectionConsistency()
+        input('n')
+        assertEquals("one n", text)
+    }
+
+    @Test fun fleksySwipeDeletesTheWordAroundAMovedCursorOnFirstSwipe() {
+        for (offset in 0..3) {
+            reset()
+            setText("one two three")
+            setCursorPosition(4 + offset)
+            assertTrue(inputLogic.deleteWordBeforeCursor())
+            handleMessages()
+            assertEquals("one three", text)
+            checkConnectionConsistency()
+        }
+    }
+
+    @Test fun fleksySwipeDeletesAWordAtTheStartOfTheField() {
+        reset()
+        setText("hello world")
+        setCursorPosition(0)
+        assertTrue(latinIME.keyboardActionListener.onFullKeyboardSwipe(-1,
+            helium314.keyboard.keyboard.KeyboardActionListener.SWIPE_DELETE_WORD))
+        handleMessages()
+        assertEquals("world", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksySwipeDeletesTheSelectedText() {
+        reset()
+        setText("one two three")
+        setCursorPosition(4, 7)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one  three", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksySwipeDeletesComposingAndMiddleWordsInWebEditors() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)
+        chainInput("one part")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        setText("one two three")
+        setCursorPosition(5)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one three", text)
+        setText("hello. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("hello ", text)
+    }
+
+    @Test fun fleksyRepeatedSwipeDeletionConsumesOneUnitAtATime() {
+        reset()
+        setText("one two. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one two ", text)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("", text)
+        assertFalse(inputLogic.deleteWordBeforeCursor())
+    }
+
+    @Test fun fleksyContinuedSpacesAppendPeriods() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello ")
+        for (count in 1..5) {
+            input(' ')
+            assertEquals("hello" + ".".repeat(count) + " ", text)
+            checkConnectionConsistency()
+        }
+        input('a')
+        assertEquals("hello..... a", text)
+    }
+
+    @Test fun fleksyPeriodRunStillAllowsPunctuationCycling() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello    ")
+        assertEquals("hello... ", text)
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello.., ", text)
+        assertTrue(inputLogic.cyclePunctuation(false))
+        assertEquals("hello... ", text)
+    }
+
+    @Test fun fleksyRepeatedSpacesRespectDisabledDoubleSpacePeriod() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, false) }
+        chainInput("hello    ")
+        assertEquals("hello    ", text)
+    }
+
+    @Test fun fleksySecondSpaceDoesNotChangeLeadingSpaces() {
+        reset()
+        chainInput("  ")
+        assertEquals("  ", text)
+    }
+
+    @Test fun fleksyPunctuationCyclesAndReverses() {
+        beginPunctuationCycle()
+        for (mark in listOf(',', '?', '!')) {
+            assertTrue(inputLogic.cyclePunctuation(true))
+            handleMessages()
+            assertEquals("hello$mark ", text)
+        }
+        assertTrue(inputLogic.cyclePunctuation(false))
+        assertEquals("hello? ", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksyPunctuationUsesCustomOrderAndStopsAfterTyping() {
+        beginPunctuationCycle(".!?,")
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello! ", text)
+        input('a')
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello! a", text)
+    }
+
+    @Test fun fleksyPunctuationStopsAfterCursorMove() {
+        beginPunctuationCycle()
+        connection.setSelection(2, 2)
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello. ", text)
+    }
+
+    @Test fun fleksyPunctuationCanBeDisabled() {
+        beginPunctuationCycle()
+        latinIME.prefs().edit { putBoolean("fleksy_punctuation_cycle", false) }
+        assertFalse(inputLogic.cyclePunctuation(true))
+        assertEquals("hello. ", text)
+    }
+
     @Test fun inputCode() {
         reset()
         input('c')

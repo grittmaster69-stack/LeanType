@@ -52,6 +52,55 @@ class SuggestTest {
             .edit { putBoolean(Settings.PREF_AUTO_CORRECTION, true) } // need to enable, off by default
     }
 
+    @Test fun fleksyCorrectsASingleStrayInteriorDigit() {
+        val result = shouldBeAutoCorrected(
+            "Disas9mbled", listOf(suggestion("Disassembled", 1500000, Locale.ENGLISH)),
+            null, null, Locale.ENGLISH, thresholdModest
+        )
+        assertEquals(true, result.last())
+    }
+
+    @Test fun fleksyStillRequiresAConfidentDigitCorrection() {
+        val result = shouldBeAutoCorrected(
+            "Disas9mbled", listOf(suggestion("Disassembled", 1000, Locale.ENGLISH)),
+            null, null, Locale.ENGLISH, thresholdModest
+        )
+        assertEquals(false, result.last())
+    }
+
+    @Test fun fleksyKeepsIntentionalNumericCodes() {
+        for ((typed, corrected) in listOf("S25" to "See", "L5P" to "Lap",
+            "part9" to "party", "9hello" to "hello", "he11o" to "hello", "A9CD" to "Acd")) {
+            val result = shouldBeAutoCorrected(
+                typed, listOf(suggestion(corrected, 1500000, Locale.ENGLISH)),
+                null, null, Locale.ENGLISH, thresholdVeryAggressive
+            )
+            assertEquals(false, result.last(), typed)
+        }
+    }
+
+    @Test fun fleksyKeepsKnownWordsContainingADigit() {
+        val locale = Locale.ENGLISH
+        val result = shouldBeAutoCorrected(
+            "he1lo", listOf(suggestion("hello", 1500000, locale), suggestion("he1lo", 1400000, locale)),
+            null, null, locale, thresholdVeryAggressive
+        )
+        assertEquals(false, result.last())
+    }
+
+    @Test fun fleksyRespectsUndoForDigitCorrections() {
+        helium314.keyboard.latin.utils.RevertedCorrectionHistory.record("Disas9mbled", "Disassembled")
+        try {
+            val result = shouldBeAutoCorrected(
+                "Disas9mbled", listOf(suggestion("Disassembled", 1500000, Locale.ENGLISH)),
+                null, null, Locale.ENGLISH, thresholdModest
+            )
+            assertEquals(false, result.last())
+        } finally {
+            helium314.keyboard.latin.utils.RevertedCorrectionHistory.remove("Disas9mbled")
+        }
+    }
+
     @Test fun `'on' to 'in' if 'in' was used before in this context`() {
         val locale = Locale.ENGLISH
         val result = shouldBeAutoCorrected(
@@ -302,6 +351,7 @@ class SuggestTest {
         latinIME.prefs().edit { putFloat(Settings.PREF_AUTO_CORRECT_THRESHOLD, autoCorrectThreshold) }
         // enable "more autocorrect" so we actually have autocorrect even though we don't set a compatible input type
         latinIME.prefs().edit { putBoolean(Settings.PREF_MORE_AUTO_CORRECTION, true) }
+        suggest.setAutoCorrectionThreshold(autoCorrectThreshold)
         currentTypingLocale = typingLocale
         val suggestionsContainer = ArrayList<SuggestedWordInfo>().apply { addAll(suggestions) }
         val suggestionResults = SuggestionResults(suggestions.size, false, false)
@@ -320,7 +370,10 @@ class SuggestTest {
             suggestionsContainer.firstOrNull(), // todo: get from suggestions? mostly it's just removing the typed word, right?
             { firstSuggestionForEmpty to typedWordSuggestionForEmpty },
             true, // doesn't make sense otherwise
-            WordComposer.getComposerForTest(false),
+            WordComposer.getComposerForTest(false).also { composer ->
+                WordComposer::class.java.getDeclaredField("mDigitsCount").apply { isAccessible = true }
+                    .setInt(composer, word.count { it.isDigit() })
+            },
             suggestionResults,
             firstOccurrenceOfTypedWordInSuggestions,
             typedWordFirstOccurrenceWordInfo
@@ -349,6 +402,8 @@ fun suggestion(word: String, score: Int, locale: Locale, shortcut: Boolean = fal
 
 @Implements(DictionaryFacilitatorImpl::class)
 class ShadowFacilitator {
+    @Implementation
+    fun isValidSpellingWord(word: String): Boolean = false
     @Implementation
     fun getCurrentLocale(): Locale = currentTypingLocale
     @Implementation

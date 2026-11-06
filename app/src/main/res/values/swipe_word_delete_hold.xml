@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="swipe_word_delete_hold">Hold swipe-left to keep deleting words</string>
+    <string name="swipe_word_delete_hold_summary">With full-keyboard swipe set to Delete word, swipe left for one word, then keep your finger down to repeat. Lift to stop.</string>
+    <string name="swipe_word_delete_hold_delay">Swipe-delete hold delay</string>
+    <string name="swipe_word_delete_repeat_interval">Swipe-delete repeat interval</string>
+</resources>

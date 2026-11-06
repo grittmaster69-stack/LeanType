@@ -408,7 +408,25 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     override fun onFinishSlidingInput() =
         keyboardSwitcher.onFinishSlidingInput(latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
 
+    override fun wordDeleteRepeatContext(): Any? = latinIME.currentInputConnection
+
+    override fun canCyclePunctuation(): Boolean =
+        !keyboardSwitcher.isGifPickerShowing && (inputLogic.canCyclePunctuation() || inputLogic.canSwipeCorrection())
+
     override fun onCustomRequest(requestCode: Int): Boolean {
+        if (requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN ||
+            requestCode == KeyboardActionListener.CODE_PUNCTUATION_UP) {
+            val handled = if (requestCode == KeyboardActionListener.CODE_PUNCTUATION_UP && inputLogic.canSwipeCorrection())
+                inputLogic.swipeUpCorrection()
+            else inputLogic.cyclePunctuation(requestCode == KeyboardActionListener.CODE_PUNCTUATION_DOWN)
+            if (!handled) return false
+            keyboardSwitcher.requestUpdatingShiftState(
+                inputLogic.getCurrentAutoCapsState(settings.current),
+                inputLogic.getCurrentRecapitalizeState()
+            )
+            performHapticFeedback(HapticEvent.GESTURE_MOVE)
+            return true
+        }
         if (requestCode == Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER) {
             return latinIME.showInputPickerDialog()
         }
@@ -516,16 +534,14 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
             true
         }
         KeyboardActionListener.SWIPE_DELETE_WORD -> {
-            if (steps < 0) {
-                inputLogic.deleteWordBeforeCursor()
+            val deleted = steps < 0 && inputLogic.deleteWordBeforeCursor()
+            if (deleted) {
                 keyboardSwitcher.requestUpdatingShiftState(
                     inputLogic.getCurrentAutoCapsState(settings.current),
                     inputLogic.getCurrentRecapitalizeState()
                 )
-                true
-            } else {
-                false
             }
+            deleted
         }
         else -> false
     }

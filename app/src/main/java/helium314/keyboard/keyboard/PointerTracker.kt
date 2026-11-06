@@ -8,6 +8,10 @@ package helium314.keyboard.keyboard
 
 import android.content.res.Resources
 import android.content.res.TypedArray
+import android.os.Handler
+import android.os.Looper
+import helium314.keyboard.keyboard.internal.SwipeWordDeleteRepeater
+import helium314.keyboard.latin.utils.prefs
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -127,6 +131,36 @@ class PointerTracker private constructor(
     // true if a keyswipe gesture is enabled and warranted.
     private var mKeySwipeAllowed = false
     private var mFullSwipeStarted = false
+    private val swipeRepeatHandler = Handler(Looper.getMainLooper())
+    private var swipeRepeatListener: KeyboardActionListener? = null
+    private var swipeRepeatEditor: Any? = null
+    private val swipeWordRepeater = SwipeWordDeleteRepeater(
+        post = { task, delay -> swipeRepeatHandler.postDelayed(task, delay); Unit },
+        remove = { swipeRepeatHandler.removeCallbacks(it) },
+        deleteWord = {
+            val view = sDrawingProxy as? View
+            if (mIsTrackingForActionDisabled || !mInHorizontalSwipe || !mKeySwipeAllowed ||
+                view?.isShown != true || getActivePointerTrackerCount() != 1 ||
+                mCurrentKey == null || sListener !== swipeRepeatListener || sListener.wordDeleteRepeatContext() !== swipeRepeatEditor ||
+                Settings.getValues().mFullKeyboardSwipe != KeyboardActionListener.SWIPE_DELETE_WORD) false
+            else sListener.onFullKeyboardSwipe(-1, KeyboardActionListener.SWIPE_DELETE_WORD)
+        }
+    )
+
+    private fun startSwipeWordRepeat() {
+        val prefs = (sDrawingProxy as? View)?.context?.prefs() ?: return
+        if (!prefs.getBoolean("swipe_word_delete_hold", true)) return
+        swipeRepeatListener = sListener
+        swipeRepeatEditor = sListener.wordDeleteRepeatContext() ?: return
+        swipeWordRepeater.start(
+            prefs.getInt("swipe_word_delete_hold_delay", 400).toLong(),
+            prefs.getInt("swipe_word_delete_repeat_interval", 250).toLong()
+        )
+    }
+    private var punctuationSwipeCandidate = false
+    private var punctuationSwipeConsumed = false
+    private var punctuationDownX = 0
+    private var punctuationDownY = 0
 
     private var mInTouchpadMode = false
     private var mTouchpadLastX = 0
@@ -561,7 +595,14 @@ class PointerTracker private constructor(
     }
 
     private fun onDownEventInternal(x: Int, y: Int, eventTime: Long) {
+        swipeWordRepeater.stop()
         var key = onDownKey(x, y, eventTime)
+        punctuationSwipeConsumed = false
+        punctuationSwipeCandidate = key != null && !key.isModifier() &&
+            key.code != KeyCode.DELETE && !sTouchpadModeActive && !sPersistentTouchpadModeActive &&
+            !sInGesture && getActivePointerTrackerCount() <= 1 && sListener.canCyclePunctuation()
+        punctuationDownX = x
+        punctuationDownY = y
         val isEmojiClipBottomRow = mKeyboard?.mId?.isEmojiClipBottomRow == true
         mIsAllowedDraggingFinger = (sParams?.mKeySelectionByDraggingFinger == true) ||
                 (key != null && key.isModifier() && !(isEmojiClipBottomRow && key.code == KeyCode.ALPHA)) ||
@@ -675,6 +716,28 @@ class PointerTracker private constructor(
         }
         if (mIsTrackingForActionDisabled) {
             return
+        }
+
+        if (punctuationSwipeConsumed) return
+        if (punctuationSwipeCandidate) {
+            val dx = x - punctuationDownX
+            val dy = y - punctuationDownY
+            val threshold = 32.dpToPx(Resources.getSystem())
+            if (getActivePointerTrackerCount() > 1 || isShowingPopupKeysPanel() || abs(dx) >= threshold) {
+                punctuationSwipeCandidate = false
+            } else if (abs(dy) >= threshold && abs(dy) > abs(dx) * 2) {
+                punctuationSwipeCandidate = false
+                val code = if (dy > 0) KeyboardActionListener.CODE_PUNCTUATION_DOWN
+                    else KeyboardActionListener.CODE_PUNCTUATION_UP
+                if (sListener.onCustomRequest(code)) {
+                    punctuationSwipeConsumed = true
+                    getTimerProxy().cancelKeyTimersOf(this)
+                    dismissPopupKeysPanel()
+                    setReleasedKeyGraphics(mCurrentKey, true)
+                    mIsDetectingGesture = false
+                    return
+                }
+            }
         }
 
         if (sGestureEnabler.shouldHandleGesture() && me != null) {
@@ -981,7 +1044,9 @@ class PointerTracker private constructor(
                 if (absDx >= minDistance) {
                     mInHorizontalSwipe = true
                     val steps = if (dX > 0) 1 else -1
-                    sListener.onFullKeyboardSwipe(steps, action)
+                    val handled = sListener.onFullKeyboardSwipe(steps, action)
+                    if (handled && steps < 0 && action == KeyboardActionListener.SWIPE_DELETE_WORD)
+                        startSwipeWordRepeat()
                 }
             }
         }
@@ -1058,6 +1123,18 @@ class PointerTracker private constructor(
     }
 
     private fun onUpEventInternal(x: Int, y: Int, eventTime: Long) {
+        swipeWordRepeater.stop()
+        punctuationSwipeCandidate = false
+        if (punctuationSwipeConsumed) {
+            punctuationSwipeConsumed = false
+            getTimerProxy().cancelKeyTimersOf(this)
+            setReleasedKeyGraphics(mCurrentKey, true)
+            mCurrentKey = null
+            mKeySwipeAllowed = false
+            sInKeySwipe = false
+            resetKeySelectionByDraggingFinger()
+            return
+        }
         getTimerProxy().cancelKeyTimersOf(this)
         val isInDraggingFinger = mIsInDraggingFinger
         val isInSlidingKeyInput = mIsInSlidingKeyInput
@@ -1136,6 +1213,7 @@ class PointerTracker private constructor(
     }
 
     override fun cancelTrackingForAction() {
+        swipeWordRepeater.stop()
         if (isShowingPopupKeysPanel()) {
             dismissPopupKeysPanel()
         }
@@ -1209,6 +1287,9 @@ class PointerTracker private constructor(
     }
 
     private fun onCancelEventInternal() {
+        swipeWordRepeater.stop()
+        punctuationSwipeCandidate = false
+        punctuationSwipeConsumed = false
         mFullSwipeStarted = false
         mInHorizontalSwipe = false
         mInVerticalSwipe = false
@@ -1357,12 +1438,14 @@ class PointerTracker private constructor(
         private val sProxyMap = WeakHashMap<DrawingProxy, Array<Any?>>(4)
 
         fun clearOldViewData() {
+            sTrackers.forEach { it.swipeWordRepeater.stop() }
             sProxyMap.clear()
             sDrawingProxy = null
         }
 
         fun switchTo(drawingProxy: DrawingProxy?) {
             if (drawingProxy == null) return
+            if (sDrawingProxy !== drawingProxy) sTrackers.forEach { it.swipeWordRepeater.stop() }
             sDrawingProxy = drawingProxy
             (drawingProxy as? MainKeyboardView)?.let {
                 sListener = it.keyboardActionListener
@@ -1490,6 +1573,7 @@ class PointerTracker private constructor(
         }
 
         fun setKeyboardActionListener(listener: KeyboardActionListener) {
+            sTrackers.forEach { it.swipeWordRepeater.stop() }
             sListener = listener
         }
 
@@ -1504,6 +1588,7 @@ class PointerTracker private constructor(
         }
 
         fun setReleasedKeyGraphicsToAllKeys() {
+            sTrackers.forEach { it.swipeWordRepeater.stop() }
             val trackersSize = sTrackers.size
             for (i in 0 until trackersSize) {
                 val tracker = sTrackers[i]

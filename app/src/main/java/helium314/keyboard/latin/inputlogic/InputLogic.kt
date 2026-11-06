@@ -1658,49 +1658,61 @@ class InputLogic(
         return true
     }
 
-    fun deleteWordBeforeCursor() {
+    fun deleteWordBeforeCursor(): Boolean {
         val settingsValues = Settings.getValues()
-        if (mConnection.hasSelection()) {
-            val selection = mConnection.getSelectedText(0)
-            if (!selection.isNullOrEmpty()) {
-                unlearnWord(selection.toString(), settingsValues, Constants.EVENT_BACKSPACE)
-            }
-            mWordComposer.reset()
-            sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
-            mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
-            mLatinIME.feedbackForDeletedWord()
-            KeyboardActionListenerImpl.deactivateSelectionMode()
-            return
-        }
-
-        if (mWordComposer.isComposingWord()) {
-            val composingWord = mWordComposer.getTypedWord()
-            if (!TextUtils.isEmpty(composingWord)) {
-                unlearnWord(composingWord, settingsValues, Constants.EVENT_BACKSPACE)
-            }
-            mWordComposer.reset()
+        val wasComposing = mWordComposer.isComposingWord()
+        cancelCorrectionSwipe()
+        punctuationCycle.cancel()
+        cancelDoubleSpacePeriodCountdown()
+        mLatinIME.mHandler.cancelUpdateSuggestionStrip()
+        mLatinIME.mHandler.cancelResumeSuggestions()
+        mConnection.beginBatchEdit()
+        try {
+            // Finish the host's composing span before deleting; committing an empty string
+            // after finishing composition merely inserts nothing and consumes the first swipe.
             mConnection.finishComposingText()
-            mConnection.commitText("", 1)
             resetComposingState(true)
+            mSpaceState = SpaceState.NONE
+            mEnteredText = null
+            mWordBeingCorrectedByCursor = null
+            mJustRevertedACommit = false
+            mLastExpandedText = null
+            mLastShortcutText = null
+            mLastExpandedCursorPosition = -1
+            mLastExpandedCursorOffset = -1
+            mJustRevertedExpandedShortcut = null
+
+            if (mConnection.hasSelection()) {
+                val selection = mConnection.getSelectedText(0)?.toString()
+                if (!selection.isNullOrEmpty())
+                    unlearnWord(selection, settingsValues, Constants.EVENT_BACKSPACE)
+                sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
+                KeyboardActionListenerImpl.deactivateSelectionMode()
+            } else {
+                val before = mConnection.getTextBeforeCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString() ?: return false
+                val after = mConnection.getTextAfterCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString() ?: ""
+                val plan = SwipeDeleteUnit.plan(before, after) ?: return false
+                if (wasComposing && !plan.word.isNullOrEmpty())
+                    unlearnWord(plan.word, settingsValues, Constants.EVENT_BACKSPACE)
+                if (InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())) {
+                    // Web editors already use delete key events for compatibility. Selecting
+                    // the exact unit first also removes the portion after a mid-word caret.
+                    val cursor = mConnection.expectedSelectionStart
+                    if (cursor < 0 || !mConnection.setSelection(cursor - plan.before, cursor + plan.after))
+                        return false
+                    sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL)
+                } else {
+                    mConnection.deleteSurroundingText(plan.before, plan.after)
+                }
+                if (plan.replacement.isNotEmpty()) mConnection.commitText(plan.replacement, 1)
+                StatsUtils.onBackspaceWordDelete(plan.before + plan.after - plan.replacement.length)
+            }
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
             mLatinIME.feedbackForDeletedWord()
-            return
+            return true
+        } finally {
+            mConnection.endBatchEdit()
         }
-
-        val textBefore = mConnection.getTextBeforeCursor(BACKSPACE_WORD_LOOKBACK, 0)?.toString()
-        if (textBefore.isNullOrEmpty()) return
-
-        val length = textBefore.length - getStartOfPreviousWord(textBefore)
-        if (length <= 0) return
-
-        if (InputTypeUtils.isWebEditor(getCurrentInputEditorInfo())) {
-            repeat(length) { sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL) }
-        } else {
-            mConnection.deleteTextBeforeCursor(length)
-        }
-        StatsUtils.onBackspaceWordDelete(length)
-        mSuggestionStripViewAccessor.setNeutralSuggestionStrip()
-        mLatinIME.feedbackForDeletedWord()
     }
 
     private fun handleBackspaceEvent(event: Event, inputTransaction: InputTransaction) {

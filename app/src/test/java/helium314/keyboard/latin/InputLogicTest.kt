@@ -187,6 +187,98 @@ class InputLogicTest {
         assertEquals("hello, ", text)
     }
 
+    @Test fun fleksySwipeDeletesPunctuationBeforeTheWord() {
+        reset()
+        chainInput("hello. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("hello ", text)
+        checkConnectionConsistency()
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("", text)
+        assertFalse(inputLogic.deleteWordBeforeCursor())
+    }
+
+    @Test fun fleksySwipeDeletesAnUnfinishedComposingWordOnFirstSwipe() {
+        reset()
+        chainInput("one part")
+        assertTrue(inputLogic.isComposingWord)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        assertFalse(inputLogic.isComposingWord)
+        checkConnectionConsistency()
+        input('n')
+        assertEquals("one n", text)
+    }
+
+    @Test fun fleksySwipeDeletesTheWordAroundAMovedCursorOnFirstSwipe() {
+        for (offset in 0..3) {
+            reset()
+            setText("one two three")
+            setCursorPosition(4 + offset)
+            assertTrue(inputLogic.deleteWordBeforeCursor())
+            handleMessages()
+            assertEquals("one three", text)
+            checkConnectionConsistency()
+        }
+    }
+
+    @Test fun fleksySwipeDeletesAWordAtTheStartOfTheField() {
+        reset()
+        setText("hello world")
+        setCursorPosition(0)
+        assertTrue(latinIME.keyboardActionListener.onFullKeyboardSwipe(-1,
+            helium314.keyboard.keyboard.KeyboardActionListener.SWIPE_DELETE_WORD))
+        handleMessages()
+        assertEquals("world", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksySwipeDeletesTheSelectedText() {
+        reset()
+        setText("one two three")
+        setCursorPosition(4, 7)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one  three", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun fleksySwipeDeletesComposingAndMiddleWordsInWebEditors() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)
+        chainInput("one part")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        setText("one two three")
+        setCursorPosition(5)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one three", text)
+        setText("hello. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("hello ", text)
+    }
+
+    @Test fun fleksyRepeatedSwipeDeletionConsumesOneUnitAtATime() {
+        reset()
+        setText("one two. ")
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one two ", text)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("one ", text)
+        assertTrue(inputLogic.deleteWordBeforeCursor())
+        handleMessages()
+        assertEquals("", text)
+        assertFalse(inputLogic.deleteWordBeforeCursor())
+    }
+
     @Test fun fleksyContinuedSpacesAppendPeriods() {
         reset()
         latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }

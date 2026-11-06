@@ -187,6 +187,37 @@ class InputLogicTest {
         assertEquals("hello, ", text)
     }
 
+    @Test fun fleksyContinuedSpacesAppendPeriods() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello ")
+        for (count in 1..5) {
+            input(' ')
+            assertEquals("hello" + ".".repeat(count) + " ", text)
+            checkConnectionConsistency()
+        }
+        input('a')
+        assertEquals("hello..... a", text)
+    }
+
+    @Test fun fleksyPeriodRunStillAllowsPunctuationCycling() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, true) }
+        chainInput("hello    ")
+        assertEquals("hello... ", text)
+        assertTrue(inputLogic.cyclePunctuation(true))
+        assertEquals("hello.., ", text)
+        assertTrue(inputLogic.cyclePunctuation(false))
+        assertEquals("hello... ", text)
+    }
+
+    @Test fun fleksyRepeatedSpacesRespectDisabledDoubleSpacePeriod() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, false) }
+        chainInput("hello    ")
+        assertEquals("hello    ", text)
+    }
+
     @Test fun fleksySecondSpaceDoesNotChangeLeadingSpaces() {
         reset()
         chainInput("  ")

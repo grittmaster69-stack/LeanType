@@ -2111,6 +2111,7 @@ class InputLogic(
         inputTransaction: InputTransaction
     ): Boolean {
         if (!inputTransaction.settingsValues.mUseDoubleSpacePeriod
+            || mConnection.hasSelection()
             || Constants.CODE_SPACE != event.codePoint
         ) {
             return false
@@ -2126,7 +2127,7 @@ class InputLogic(
         } else {
             lastTwo[length - 2].code
         }
-        if (canBeFollowedByDoubleSpacePeriod(firstCodePoint)) {
+        if (canBeFollowedByDoubleSpacePeriod(firstCodePoint) || firstCodePoint == '.'.code) {
             cancelDoubleSpacePeriodCountdown()
             mConnection.deleteTextBeforeCursor(1)
             val textToInsert = inputTransaction.settingsValues.mSpacingAndPunctuations.mSentenceSeparatorAndSpace

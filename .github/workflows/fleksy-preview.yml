@@ -24,7 +24,7 @@ jobs:
           cache-read-only: false
       - run: chmod +x gradlew
       - name: Test keyboard gestures
-        run: ./gradlew testStandardDebugUnitTest --tests '*FleksyPunctuationCycleTest' --tests '*InputLogicTest.fleksy*' --tests '*SwipeWordDeleteRepeaterTest'
+        run: ./gradlew testStandardDebugUnitTest --tests '*FleksyPunctuationCycleTest' --tests '*InputLogicTest.fleksy*' --tests '*SwipeWordDeleteRepeaterTest' --tests '*ParserTest.fleksy*' --tests '*ParserTest.hexTypewisePopupKeys'
       - name: Restore permanent signing key when configured
         env:
           SIGNING_KEY_BASE64: ${{ secrets.LEANTYPE_SIGNING_KEY_BASE64 }}

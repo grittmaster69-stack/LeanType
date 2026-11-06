@@ -60,6 +60,14 @@ class SuggestTest {
         assertEquals(true, result.last())
     }
 
+    @Test fun fleksyStillRequiresAConfidentDigitCorrection() {
+        val result = shouldBeAutoCorrected(
+            "Disas9mbled", listOf(suggestion("Disassembled", 1000, Locale.ENGLISH)),
+            null, null, Locale.ENGLISH, thresholdModest
+        )
+        assertEquals(false, result.last())
+    }
+
     @Test fun fleksyKeepsIntentionalNumericCodes() {
         for ((typed, corrected) in listOf("S25" to "See", "L5P" to "Lap",
             "part9" to "party", "9hello" to "hello", "he11o" to "hello", "A9CD" to "Acd")) {
@@ -343,6 +351,7 @@ class SuggestTest {
         latinIME.prefs().edit { putFloat(Settings.PREF_AUTO_CORRECT_THRESHOLD, autoCorrectThreshold) }
         // enable "more autocorrect" so we actually have autocorrect even though we don't set a compatible input type
         latinIME.prefs().edit { putBoolean(Settings.PREF_MORE_AUTO_CORRECTION, true) }
+        suggest.setAutoCorrectionThreshold(autoCorrectThreshold)
         currentTypingLocale = typingLocale
         val suggestionsContainer = ArrayList<SuggestedWordInfo>().apply { addAll(suggestions) }
         val suggestionResults = SuggestionResults(suggestions.size, false, false)
